@@ -233,6 +233,8 @@ func (p *TinyMQS) ReceiveMessage(resp http.ResponseWriter, req *http.Request, pa
 					return
 				}
 
+				time.Sleep(time.Microsecond * 1)
+
 				if time.Now().UTC().Sub(now) >= waitSeconds {
 					errChan <- ERR_NO_MESSAGE.New(errors.Params{"queueName": queueName})
 					return
