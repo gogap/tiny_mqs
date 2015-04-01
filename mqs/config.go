@@ -21,7 +21,7 @@ type PoolConfig struct {
 	OwnerId         string        `json:"owner_id"`
 	AccessKeyId     string        `json:"access_key_id"`
 	AccessKeySecert string        `json:"access_key_secret"`
-	Mode            string        `json:"default"`
+	Mode            string        `json:"mode"`
 	Queues          []QueueConfig `json:"queues"`
 }
 
