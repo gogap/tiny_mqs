@@ -1,0 +1,18 @@
+{
+    "http": {
+        "address": "127.0.0.1:80"
+    },
+    "pools": [{
+        "owner_id": "zeal",
+        "access_key_id": "",
+        "access_key_secret": "",
+        "mode": "default",
+        "queues": [{
+            "name": "test",
+            "max_message_size": 65535,
+            "message_retention_period": 60,
+            "visibility_timeout": 70,
+            "polling_wait_seconds": 30
+        }]
+    }]
+}
