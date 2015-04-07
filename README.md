@@ -7,17 +7,17 @@ TINY_MQS
 
 #### 安装
 ```bash
-go get -u github.com/gogap/tiny_mqs
+$ go get -u github.com/gogap/tiny_mqs
 ```
 
 #### 设置参数
 ```bash
-cd $GOPATH/src/github.com/gogap/tiny_mqs
-cp conf/tiny_mqs.conf.example conf/tiny_mqs.conf
+$ cd $GOPATH/src/github.com/gogap/tiny_mqs
+$ cp conf/tiny_mqs.conf.example conf/tiny_mqs.conf
 ```
 
 ```bash
-vim conf/tiny_mqs.conf
+$ vim conf/tiny_mqs.conf
 ```
 
 ```json
@@ -72,15 +72,24 @@ vim conf/tiny_mqs.conf
 如果是是用的docker，大家需要安装dnsmasq或类似工具, 然后为docker设置对应的DNS。
 
 
-### 启动
+### 本地启动
 
 ```
-go run main.go
+$ go run main.go
 ```
 
 如果是使用的低位端口，如80,则需要使用sudo，建议先编译再执行
 
 ```
-go build
-sudo ./tiny_mqs
+$ go build
+$ sudo ./tiny_mqs
 ```
+
+### 使用 docker compose 启动
+
+```bash
+$ make
+$ docker-compose build
+$ docker-compose up
+```
+

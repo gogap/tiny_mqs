@@ -1,0 +1,6 @@
+tinymqs:
+    build: .
+    ports:
+        - "8086:8086"
+    volumes:
+        - conf/conf.d/:/etc/nginx/conf.d/
