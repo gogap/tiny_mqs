@@ -18,6 +18,6 @@ func DefaultQueueProperty(name string) QueueProperty {
 		MaxMessageSize:         65535,
 		MessageRetentionPeriod: 70 * time.Second,
 		VisibilityTimeout:      60 * time.Second,
-		PollingWaitSeconds:     60 * time.Second,
+		PollingWaitSeconds:     30 * time.Second,
 	}
 }
