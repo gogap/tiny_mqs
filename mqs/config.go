@@ -18,6 +18,7 @@ type QueueConfig struct {
 }
 
 type PoolConfig struct {
+	Host            string        `json:"host"`
 	OwnerId         string        `json:"owner_id"`
 	AccessKeyId     string        `json:"access_key_id"`
 	AccessKeySecert string        `json:"access_key_secret"`

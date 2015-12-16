@@ -93,7 +93,7 @@ func (p *MessagePool) Enqueue(queueName string, delaySeconds time.Duration, prio
 
 	if !exist {
 		if p.poolMode == PoolModeDefault {
-			err = ERR_QUEUE_NOT_EXIST.New(errors.Params{"queueName": queueName})
+			err = ErrQueueNotExist.New(errors.Params{"queueName": queueName})
 			return
 		} else {
 			p.queueMessageIndex[queueName] = []string{}
@@ -124,15 +124,15 @@ func (p *MessagePool) Dequeue(queueName string) (message TinyQueueMessage, err e
 
 	if !exist {
 		if p.poolMode == PoolModeDefault {
-			err = ERR_QUEUE_NOT_EXIST.New(errors.Params{"queueName": queueName})
+			err = ErrQueueNotExist.New(errors.Params{"queueName": queueName})
 		} else {
-			err = ERR_NO_MESSAGE.New(errors.Params{"queueName": queueName})
+			err = ErrNoMessage.New(errors.Params{"queueName": queueName})
 		}
 		return
 	}
 
 	if queue == nil || len(queue) == 0 {
-		err = ERR_NO_MESSAGE.New(errors.Params{"queueName": queueName})
+		err = ErrNoMessage.New(errors.Params{"queueName": queueName})
 		return
 	} else {
 		putQueueBack := []string{}
@@ -170,7 +170,7 @@ func (p *MessagePool) Dequeue(queueName string) (message TinyQueueMessage, err e
 		}
 
 		if !getted {
-			err = ERR_NO_MESSAGE.New(errors.Params{"queueName": queueName})
+			err = ErrNoMessage.New(errors.Params{"queueName": queueName})
 			return
 		}
 		return
@@ -194,7 +194,7 @@ func (p *MessagePool) Delete(queueName string, receiptHandle string) (err error)
 func (p *MessagePool) GetQueueProperty(queueName string) (property QueueProperty, err error) {
 	if prop, exists := p.queuesProperty[queueName]; !exists {
 		if p.poolMode == PoolModeDefault {
-			err = ERR_QUEUE_NOT_EXIST.New(errors.Params{"queueName": queueName})
+			err = ErrQueueNotExist.New(errors.Params{"queueName": queueName})
 			return
 		} else {
 			property = DefaultQueueProperty(queueName)

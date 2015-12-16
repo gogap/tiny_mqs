@@ -17,21 +17,33 @@ import (
 )
 
 type TinyMQS struct {
-	mqsPools map[string]*MessagePool //key: ownerId
+	mqsPools    map[string]*MessagePool //key: host
+	hostOwnerId map[string]string
 
 	conf TinyMQSConfig
 }
 
 func NewTinyMQS() *TinyMQS {
 	return &TinyMQS{
-		mqsPools: make(map[string]*MessagePool),
+		mqsPools:    make(map[string]*MessagePool),
+		hostOwnerId: make(map[string]string),
 	}
 }
 
 func (p *TinyMQS) CreatePools(pools []PoolConfig) (err error) {
 	for _, pool := range pools {
 		if pool.OwnerId == "" {
-			err = ERR_OWNER_ID_IS_EMPTY.New()
+			err = ErrOwnerIDIsEmpty.New()
+			return
+		}
+
+		if pool.Host == "" {
+			err = ErrHostIsEmpty.New(errors.Params{"ownerId": pool.OwnerId})
+			return
+		}
+
+		if _, exist := p.mqsPools[pool.Host]; exist {
+			err = ErrPoolAlreadyExist.New(errors.Params{"ownerId": pool.OwnerId})
 			return
 		}
 
@@ -48,7 +60,7 @@ func (p *TinyMQS) CreatePools(pools []PoolConfig) (err error) {
 		if pool.Queues != nil {
 			for _, property := range pool.Queues {
 				if property.Name == "" {
-					err = ERR_QUEUE_NAME_IS_EMPTY.New()
+					err = ErrQueueNameIsEmpty.New(errors.Params{"ownerId": pool.OwnerId})
 					return
 				}
 
@@ -63,7 +75,8 @@ func (p *TinyMQS) CreatePools(pools []PoolConfig) (err error) {
 				properties = append(properties, prop)
 			}
 		}
-		p.mqsPools[pool.OwnerId] = NewMessagePool(mode, properties...)
+		p.mqsPools[pool.Host] = NewMessagePool(mode, properties...)
+		p.hostOwnerId[pool.Host] = pool.OwnerId
 	}
 	return
 }
@@ -91,14 +104,6 @@ func (p *TinyMQS) Run() {
 	m.RunOnAddr(p.conf.HTTP.Address)
 }
 
-func getOwnerId(host string) string {
-	firstPoint := strings.Index(host, ".")
-	if firstPoint > 0 {
-		return host[0:firstPoint]
-	}
-	return host
-}
-
 func getHostId(host string) string {
 	return "http://" + host
 }
@@ -112,7 +117,7 @@ func errResp(requestId string, hostId string, err error, resp http.ResponseWrite
 	statusCode := 200
 	var errMsg ErrorMessageResponse
 
-	if ERR_NO_MESSAGE.IsEqual(err) {
+	if ErrNoMessage.IsEqual(err) {
 		errMsg = ErrorMessageResponse{
 			Code:      "MessageNotExist",
 			Message:   "Message not exist.",
@@ -120,7 +125,7 @@ func errResp(requestId string, hostId string, err error, resp http.ResponseWrite
 			HostId:    hostId,
 		}
 		statusCode = http.StatusNotFound
-	} else if ERR_OWNER_ID_NOT_ALLOWED.IsEqual(err) {
+	} else if ErrPoolNotExist.IsEqual(err) {
 		errMsg = ErrorMessageResponse{
 			Code:      "AccessDenied",
 			Message:   "The OwnerId that your Access Key Id associated to is forbidden for this operation.",
@@ -128,7 +133,7 @@ func errResp(requestId string, hostId string, err error, resp http.ResponseWrite
 			HostId:    hostId,
 		}
 		statusCode = http.StatusForbidden
-	} else if ERR_RECEIPT_HANDLE_ERROR.IsEqual(err) {
+	} else if ErrBadReceiptHandle.IsEqual(err) {
 		errMsg = ErrorMessageResponse{
 			Code:      "ReceiptHandleError",
 			Message:   "The receipt handle you provide is not valid.",
@@ -136,7 +141,7 @@ func errResp(requestId string, hostId string, err error, resp http.ResponseWrite
 			HostId:    hostId,
 		}
 		statusCode = http.StatusForbidden
-	} else if ERR_QUEUE_NOT_EXIST.IsEqual(err) {
+	} else if ErrQueueNotExist.IsEqual(err) {
 		errMsg = ErrorMessageResponse{
 			Code:      "QueueNotExist",
 			Message:   "The queue name you provided is not exist.",
@@ -176,10 +181,9 @@ func (p *TinyMQS) ReceiveMessage(resp http.ResponseWriter, req *http.Request, pa
 	}()
 
 	queueName := params["_1"]
-	ownerId := getOwnerId(req.Host)
 
-	if pool, exist := p.mqsPools[ownerId]; !exist {
-		err = ERR_OWNER_ID_NOT_ALLOWED.New(errors.Params{"ownerId": ownerId})
+	if pool, exist := p.mqsPools[trimHost(req.Host)]; !exist {
+		err = ErrPoolNotExist.New()
 		return
 	} else {
 		var queueProperty QueueProperty
@@ -194,6 +198,13 @@ func (p *TinyMQS) ReceiveMessage(resp http.ResponseWriter, req *http.Request, pa
 		}
 
 		strWaitseconds := req.FormValue("waitseconds")
+		strNumOfMessages := req.FormValue("numOfMessages")
+
+		isMulti := false
+		if strNumOfMessages != "" {
+			isMulti = true
+		}
+
 		if strWaitseconds != "" {
 			if sec, e := strconv.ParseInt(strWaitseconds, 10, 64); e == nil {
 				if sec >= 0 && sec <= 30 {
@@ -214,8 +225,8 @@ func (p *TinyMQS) ReceiveMessage(resp http.ResponseWriter, req *http.Request, pa
 
 			now := time.Now().UTC()
 			for {
-				if queueMsg, e := p.receive(ownerId, queueName); e != nil {
-					if !ERR_NO_MESSAGE.IsEqual(e) {
+				if queueMsg, e := p.receive(pool, queueName); e != nil {
+					if !ErrNoMessage.IsEqual(e) {
 						errChan <- e
 					}
 				} else {
@@ -236,7 +247,7 @@ func (p *TinyMQS) ReceiveMessage(resp http.ResponseWriter, req *http.Request, pa
 				time.Sleep(time.Microsecond * 1)
 
 				if time.Now().UTC().Sub(now) >= waitSeconds {
-					errChan <- ERR_NO_MESSAGE.New(errors.Params{"queueName": queueName})
+					errChan <- ErrNoMessage.New(errors.Params{"queueName": queueName})
 					return
 				}
 			}
@@ -245,10 +256,24 @@ func (p *TinyMQS) ReceiveMessage(resp http.ResponseWriter, req *http.Request, pa
 		select {
 		case msg := <-messageChan:
 			{
-				if xmlData, e := xml.Marshal(&msg); e != nil {
-					err = ERR_INTERNAL_ERROR.New(errors.Params{"err": e})
+				// TODO: implament true batch receive
+				if !isMulti {
+					if xmlData, e := xml.Marshal(&msg); e != nil {
+						err = ErrInternalError.New(errors.Params{"err": e})
+					} else {
+						ownerId := p.hostOwnerId[trimHost(req.Host)]
+						resp.Write([]byte(xml.Header + string(xmlData)))
+						fmt.Printf("[*]ReceiveMessage:\n\tOwnerId:%s\n\tQueue:%s\n\t%s\n\n", ownerId, queueName, string(xmlData))
+					}
 				} else {
-					resp.Write([]byte(xml.Header + string(xmlData)))
+					messages := BatchMessageReceiveResponse{Messages: []MessageReceiveResponse{msg}}
+					if xmlData, e := xml.Marshal(&messages); e != nil {
+						err = ErrInternalError.New(errors.Params{"err": e})
+					} else {
+						ownerId := p.hostOwnerId[trimHost(req.Host)]
+						resp.Write([]byte(xml.Header + string(xmlData)))
+						fmt.Printf("[*]ReceiveMessages:\n\tOwnerId:%s\n\tQueue:%s\n\t%s\n\n", ownerId, queueName, string(xmlData))
+					}
 				}
 
 				return
@@ -276,12 +301,15 @@ func (p *TinyMQS) SendMessage(resp http.ResponseWriter, req *http.Request, param
 				errResp(requestId, hostId, err, resp)
 			}
 		}()
+	}
 
+	pool, exist := p.mqsPools[trimHost(req.Host)]
+	if !exist {
+		err = ErrPoolNotExist.New()
+		return
 	}
 
 	queueName := params["_1"]
-	ownerId := getOwnerId(req.Host)
-
 	reqMsg := MessageSendRequest{}
 
 	var reqBody []byte
@@ -294,9 +322,13 @@ func (p *TinyMQS) SendMessage(resp http.ResponseWriter, req *http.Request, param
 	}
 
 	msgId := ""
-	if msgId, err = p.send(ownerId, queueName, time.Duration(reqMsg.DelaySeconds)*time.Second, reqMsg.Priority, reqMsg.MessageBody); err != nil {
+	if msgId, err = p.send(pool, queueName, time.Duration(reqMsg.DelaySeconds)*time.Second, reqMsg.Priority, reqMsg.MessageBody); err != nil {
 		return
 	}
+
+	ownerId := p.hostOwnerId[trimHost(req.Host)]
+
+	fmt.Printf("[*]SendMessage:\n\tOwnerId:%s\n\tQueue:%s\n\t%s\n\n", ownerId, queueName, string(reqBody))
 
 	respMsg := MessageSendResponse{
 		MessageId:      msgId,
@@ -304,7 +336,7 @@ func (p *TinyMQS) SendMessage(resp http.ResponseWriter, req *http.Request, param
 	}
 
 	if xmlData, e := xml.Marshal(&respMsg); e != nil {
-		err = ERR_INTERNAL_ERROR.New(errors.Params{"err": e})
+		err = ErrInternalError.New(errors.Params{"err": e})
 	} else {
 		resp.Write([]byte(xml.Header + string(xmlData)))
 	}
@@ -323,51 +355,45 @@ func (p *TinyMQS) DeleteMessage(resp http.ResponseWriter, req *http.Request, par
 				errResp(requestId, hostId, err, resp)
 			}
 		}()
-
 	}
 
-	queueName := params["_1"]
-	ownerId := getOwnerId(req.Host)
-
-	strReceiptHandle := req.FormValue("ReceiptHandle")
-	if strReceiptHandle == "" {
-		ERR_RECEIPT_HANDLE_ERROR.New(errors.Params{"handle": strReceiptHandle})
+	pool, exist := p.mqsPools[trimHost(req.Host)]
+	if !exist {
+		err = ErrPoolNotExist.New()
 		return
 	}
 
-	if err = p.delete(ownerId, queueName, strReceiptHandle); err != nil {
+	queueName := params["_1"]
+
+	strReceiptHandle := req.FormValue("ReceiptHandle")
+	if strReceiptHandle == "" {
+		ErrBadReceiptHandle.New(errors.Params{"handle": strReceiptHandle})
+		return
+	}
+
+	if err = p.delete(pool, queueName, strReceiptHandle); err != nil {
 		return
 	}
 
 	resp.WriteHeader(http.StatusNoContent)
 }
 
-func (p *TinyMQS) receive(ownerId, queueName string) (message TinyQueueMessage, err error) {
-	if pool, exist := p.mqsPools[ownerId]; !exist {
-		err = ERR_OWNER_ID_NOT_EXIST.New(errors.Params{"ownerId": ownerId})
-		return
-	} else {
-		message, err = pool.Dequeue(queueName)
-		return
-	}
+func (p *TinyMQS) receive(pool *MessagePool, queueName string) (message TinyQueueMessage, err error) {
+	message, err = pool.Dequeue(queueName)
+	return
 }
 
-func (p *TinyMQS) send(ownerId, queueName string, delaySeconds time.Duration, priority int64, body Base64Bytes) (id string, err error) {
-	if pool, exist := p.mqsPools[ownerId]; !exist {
-		err = ERR_OWNER_ID_NOT_EXIST.New(errors.Params{"ownerId": ownerId})
-		return
-	} else {
-		id, err = pool.Enqueue(queueName, delaySeconds, priority, body)
-		return
-	}
+func (p *TinyMQS) send(pool *MessagePool, queueName string, delaySeconds time.Duration, priority int64, body Base64Bytes) (id string, err error) {
+	id, err = pool.Enqueue(queueName, delaySeconds, priority, body)
+	return
 }
 
-func (p *TinyMQS) delete(ownerId, queueName, receiptHandle string) (err error) {
-	if pool, exist := p.mqsPools[ownerId]; !exist {
-		err = ERR_OWNER_ID_NOT_EXIST.New(errors.Params{"ownerId": ownerId})
-		return
-	} else {
-		err = pool.Delete(queueName, receiptHandle)
-		return
-	}
+func (p *TinyMQS) delete(pool *MessagePool, queueName, receiptHandle string) (err error) {
+	err = pool.Delete(queueName, receiptHandle)
+	return
+}
+
+func trimHost(host string) string {
+	portIndex := strings.Index(host, ":")
+	return host[0:portIndex]
 }
